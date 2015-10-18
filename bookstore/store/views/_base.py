@@ -1,0 +1,380 @@
+import json
+import urlparse
+from urlparse import urlparse, urljoin
+
+from django.shortcuts import render
+from django.shortcuts import render_to_response
+from django.template import RequestContext
+from django.contrib import auth
+from django.http import HttpResponse, HttpResponseRedirect
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
+from django.db.models.query import QuerySet
+from django.db.models import Q
+from store.forms import *
+from django.contrib.auth import logout
+from django.views.decorators.csrf import csrf_protect
+import bookstore.settings as settings
+
+from store.models import *
+
+from utils import BaseClass
+
+utils = BaseClass()
+
+from store.models import *
+
+@csrf_protect
+def register(request):
+    is_success = False
+    if request.method == 'POST':
+        form = RegistrationForm(request.POST)
+        if form.is_valid():
+            user = User.objects.create_user(
+            username=form.cleaned_data['username'],
+            password=form.cleaned_data['password1'],
+            email=form.cleaned_data['email']
+            )
+            is_success = True
+    else:
+        form = RegistrationForm()
+
+    response_data = {'form': form, 'errors': form._errors}
+    if is_success:
+        response_data['successmsg'] = "Registration Successful please Login."
+        errors = response_data.pop('errors')
+
+    variables = RequestContext(request, response_data)
+    return render(request,'registration/register.html',variables,)
+
+def logout_page(request):
+    logout(request)
+    return HttpResponseRedirect('/')
+
+@login_required
+def home(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    result['username'] = request.user.username
+    result['page']     = 'home'
+    deals = result.setdefault('deals', [])
+
+    active_deals = Deals.objects.filter(status__in = [0, 1]).order_by('-dt_added')
+    for active_deal in active_deals:
+        deal_data = model_to_dict(active_deal)
+        deal_data['status'] = utils.get_text_for_enum(Deals, 'status', deal_data['status'])
+        deal_data['price'] = utils.get_digit(deal_data['price'])
+
+        latest_bid = {}
+        bids = active_deal.bid_set.all().order_by('-dt_added')
+        if bids:
+            latest_bid_obj = bids[0]
+            latest_bid['price'] = utils.get_digit(latest_bid_obj.price)
+            latest_bid['username'] = latest_bid_obj.user.username
+
+        if latest_bid:
+            deal_data['latest_bid'] = latest_bid
+        deals.append(deal_data)
+
+    '''
+    try:
+        response_data = json.dumps(response_data)
+    except TypeError:
+        parsed_response_dict = utils.parse_unhandled_types(response_data, date_to_epoch=True)
+        response_data = json.dumps(parsed_response_dict)
+    '''
+
+    return render(request,'home.html', response_data)
+
+@login_required
+def mydeals(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    user = request.user
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    result['username'] = user.username
+    result['page']     = 'mydeals'
+    deals = result.setdefault('deals', [])
+
+    is_staff = user.is_staff
+    if is_staff:
+        active_deals = Deals.objects.filter(status = 1)
+    else:
+        active_deals = set(Deals.objects.filter(status = 1, bid__user = user))
+
+    for active_deal in active_deals:
+        deal_data = model_to_dict(active_deal)
+        deal_data['status'] = utils.get_text_for_enum(Deals, 'status', deal_data['status'])
+        deal_data['price'] = utils.get_digit(deal_data['price'])
+
+        latest_bid = {}
+        bids = active_deal.bid_set.all().order_by('-dt_added')
+        if bids:
+            latest_bid_obj = bids[0]
+            latest_bid['price'] = utils.get_digit(latest_bid_obj.price)
+            latest_bid['username'] = latest_bid_obj.user.username
+
+        if latest_bid:
+            deal_data['latest_bid'] = latest_bid
+        deals.append(deal_data)
+
+    '''
+    try:
+        response_data = json.dumps(response_data)
+    except TypeError:
+        parsed_response_dict = utils.parse_unhandled_types(response_data, date_to_epoch=True)
+        response_data = json.dumps(parsed_response_dict)
+    '''
+
+    return render(request,'home.html', response_data)
+
+@login_required
+def finalized_deals(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    user = request.user
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    result['username'] = user.username
+    result['page']     = 'finalizeddeals'
+    deals = result.setdefault('deals', [])
+
+    is_staff = user.is_staff
+    if is_staff:
+        active_deals = Deals.objects.filter(status = 2).order_by('-dt_added')
+    else:
+        active_deals = set(Deals.objects.filter(status = 2, bid__user = user).order_by('-dt_added'))
+
+    for active_deal in active_deals:
+        deal_data = model_to_dict(active_deal)
+        deal_data['status'] = utils.get_text_for_enum(Deals, 'status', deal_data['status'])
+        deal_data['price'] = utils.get_digit(deal_data['price'])
+
+        won_bid = active_deal.won_bid
+        latest_bid = {}
+        if isinstance(won_bid, Bid):
+            latest_bid['price'] = utils.get_digit(won_bid.price)
+            latest_bid['username'] = won_bid.user.username
+        else:
+            continue
+
+        deal_data['latest_bid'] = latest_bid
+        deals.append(deal_data)
+
+    '''
+    try:
+        response_data = json.dumps(response_data)
+    except TypeError:
+        parsed_response_dict = utils.parse_unhandled_types(response_data, date_to_epoch=True)
+        response_data = json.dumps(parsed_response_dict)
+    '''
+
+    return render(request,'home.html', response_data)
+
+@login_required
+def add_deal(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    user = request.user
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    result['username'] = user.username
+    result['page']     = "adddeal"
+
+    is_staff = user.is_staff
+    if not is_staff:
+        response_data['message'] = "You need Staff access to create Deals."
+        response_data['error']   = 1
+        return render(request,'add_deal.html', response_data)
+
+    if request.method == 'POST':
+        mobile      = request.POST.get('mobile', '')
+        brand       = request.POST.get('brand', '')
+        description = request.POST.get('description', '')
+        price       = request.POST.get('price', '')
+
+        imp_fields    = [mobile, brand, price]
+        failed_fields = [i for i in imp_fields if not i]
+        if failed_fields:
+            response_data['message'] = "Mobile/Brand/Price fields can't be empty."
+            response_data['error']   = 1
+            return render(request,'add_deal.html', response_data)
+
+        deal_info = {'mobile': mobile, 'brand': brand, 'description': description, 'price': price}
+        resp_status, status_msg, deal_obj = utils.create_model_entry(Deals, deal_info)
+        if not isinstance(deal_obj, Deals):
+            response_data['message'] = "Failed to create Deal, Error: %s" % status_msg
+            response_data['error']   = 1
+            return render(request,'add_deal.html', response_data)
+
+        return HttpResponseRedirect('/')
+    else:
+        return render(request,'add_deal.html', response_data)
+
+@login_required
+def submit_bid(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    user  = request.user
+
+    if request.method == 'POST':
+        deal  = request.POST.get('deal_id')
+        price = request.POST.get('price')
+        price = utils.get_digit(price)
+        if not deal:
+            response_data['message'] = "Ooops, deal_id can't be empty."
+            response_data['error']   = 1
+            return render(request,'submit_bid.html', response_data)
+
+        if not price:
+            response_data['message'] = "Ooops, Price can't be empty."
+            response_data['error']   = 1
+            return render(request,'submit_bid.html', response_data)
+
+        if not isinstance(deal, Deals):
+            deal = utils.get_exact_match(Deals, deal)
+            if not isinstance(deal, Deals):
+                response_data['message'] = "Ooops, given deal_id doesn't exist."
+                response_data['error']   = 1
+                return render(request,'submit_bid.html', response_data)
+
+        if deal.status not in [0, 1]:
+            response_data['message'] = "Bid can be submited for Active Deals or Pending Deals Only."
+            response_data['error']   = 1
+            return render(request,'submit_bid.html', response_data)
+
+        latest_bid_obj = ''
+        bids = deal.bid_set.all().order_by('-dt_added')
+        if bids:
+            latest_bid_obj = bids[0]
+
+        if isinstance(latest_bid_obj, Bid):
+            min_price = latest_bid_obj.price
+        else:
+            min_price = deal.price
+
+        if min_price >= price:
+            response_data['message'] = "Ooops, Bid prices should be greater than MinPrice: %s." % min_price
+            response_data['error']   = 1
+            return render(request, 'submit_bid.html', response_data)
+
+        bid_info = {'deal': deal, 'user': user, 'price': price}
+        resp_status, status_msg, latest_bid_obj = utils.create_model_entry(Bid, bid_info)
+        if not isinstance(latest_bid_obj, Bid):
+            response_data['message'] = "Faied to create Bid entry, Error Message: %s." % status_msg
+            response_data['error']   = 1
+            return render(request, 'submit_bid.html', response_data)
+
+        deal.status = 1
+        deal.save()
+
+        latest_bid = {}
+        latest_bid['price'] = utils.get_digit(latest_bid_obj.price)
+        latest_bid['username'] = latest_bid_obj.user.username
+
+        deal_data = model_to_dict(deal)
+        deal_data['status'] = utils.get_text_for_enum(Deals, 'status', deal_data['status'])
+        deal_data['price'] = utils.get_digit(deal_data['price'])
+        if latest_bid:
+            deal_data['latest_bid'] = latest_bid
+
+        result.update(deal_data)
+
+        return HttpResponseRedirect('/mydeals/')
+    else:
+        deal  = request.GET.get('deal_id')
+        if not deal:
+            response_data['message'] = "Ooops, deal_id can't be empty."
+            response_data['error']   = 1
+            return render(request,'submit_bid.html', response_data)
+
+        if not isinstance(deal, Deals):
+            deal = utils.get_exact_match(Deals, deal)
+            if not isinstance(deal, Deals):
+                response_data['message'] = "Ooops, given deal_id doesn't exist."
+                response_data['error']   = 1
+                return render(request,'submit_bid.html', response_data)
+
+        latest_bid_obj = ''
+        bids = deal.bid_set.all().order_by('-dt_added')
+        if bids:
+            latest_bid_obj = bids[0]
+
+        deal_data = model_to_dict(deal)
+        deal_data['status'] = utils.get_text_for_enum(Deals, 'status', deal_data['status'])
+        deal_data['price'] = utils.get_digit(deal_data['price'])
+        if isinstance(latest_bid_obj, Bid):
+            latest_bid = {}
+            latest_bid['price'] = utils.get_digit(latest_bid_obj.price)
+            latest_bid['username'] = latest_bid_obj.user.username
+
+            deal_data['latest_bid'] = latest_bid
+
+        result.update(deal_data)
+
+        return render(request, 'submit_bid.html', response_data)
+
+@login_required
+def update_deal(request):
+    if not request.user.is_authenticated():
+        return render(request,"login.html")
+
+    response_data = {"error": 0, "message": ""}
+    result = response_data.setdefault('result', {})
+    user  = request.user
+
+    deal      = request.POST.get('deal_id') or request.GET.get('deal_id')
+    action    = request.POST.get('action') or request.GET.get('action')
+    next_page = request.POST.get('next', '/') or request.GET.get('next', '/')
+
+    if not deal:
+        response_data['message'] = "Ooops, deal_id can't be empty."
+        response_data['error']   = 1
+        return HttpResponseRedirect(next_page)
+
+    if not isinstance(deal, Deals):
+        deal = utils.get_exact_match(Deals, deal)
+        if not isinstance(deal, Deals):
+            response_data['message'] = "Ooops, given deal_id doesn't exist."
+            response_data['error']   = 1
+            return HttpResponseRedirect(next_page)
+
+    if not action:
+        response_data['message'] = "Action can't be empty."
+        response_data['error']   = 1
+        return HttpResponseRedirect(next_page)
+
+    if action == 'close' and deal.status != 1:
+        response_data['message'] = "Deal should be in Pending Status to Close."
+        response_data['error']   = 1
+        return HttpResponseRedirect(next_page)
+
+    if action == 'close':
+        latest_bid_obj = ''
+        bids = deal.bid_set.all().order_by('-dt_added')
+        if bids:
+            latest_bid_obj = bids[0]
+
+        if not isinstance(latest_bid_obj, Bid):
+            response_data['message'] = "There are no Bids for this Deal to close."
+            response_data['error']   = 1
+            return HttpResponseRedirect(next_page)
+
+        deal.won_bid = latest_bid_obj
+        deal.status  = 2
+        deal.save()
+    elif action == 'delete':
+        deal.status = 3
+        deal.save()
+
+    return HttpResponseRedirect(next_page)

@@ -1,0 +1,33 @@
+{% extends "app_base.html" %}
+{% block page %}
+
+
+
+          <!-- Page Heading -->
+          <div class="row">
+              <div class="col-lg-12">
+                  <h1 class="page-header">
+                      Add Deal
+                  </h1>
+              </div>
+          </div>
+          <!-- /.row -->
+
+
+          <div class="col-lg">
+
+            <form action="." method="POST" style="text-align: center; width: 300px; margin: 0px auto;">
+
+              {% csrf_token %}
+              <label>Mobile</label>
+              <input type="text" name="mobile" class="form-control"/>
+              <label>Brand</label>
+              <input type="text" name="brand" class="form-control"/>
+              <label>Min Price</label>
+              <input type="text" name="price" class="form-control"/>
+              <p></p>
+              <input type="submit" class="btn btn-primary btn-lg" value="Submit"/>
+            </form>
+          </div>
+
+{% endblock %}

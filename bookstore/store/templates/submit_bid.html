@@ -1,0 +1,63 @@
+{% extends "app_base.html" %}
+{% block page %}
+
+
+
+          <!-- Page Heading -->
+          <div class="row">
+              <div class="col-lg-12">
+                  <h1 class="page-header">
+                      Submit Your Bid
+                  </h1>
+              </div>
+          </div>
+          <!-- /.row -->
+
+
+          <div class="col-lg">
+
+            <form id="submitDeal" action="." method="POST" style="text-align: center; width: 300px; margin: 0px auto;">
+
+              {% csrf_token %}
+              <input type="hidden" name="deal_id" value="{{ result.id }}"/>
+              <h2>Deal #{{ result.id }}</h2>
+              <label>Mobile</label>
+              <p>{{ result.mobile }}</p>
+              <label>Brand</label>
+              <p>{{ result.brand }}</p>
+              <label>Min Price</label>
+              <p>{{ result.price }}</p>
+              <label>Your Bid Price</label>
+              <input id="price-input" type="text" class="form-control" name="price"
+                     data-original-value="{% if result.latest_bid %}{{result.latest_bid.price }}{% else %}{{result.price}}{% endif %}"
+                     value="{% if result.latest_bid %}{{result.latest_bid.price }}{% else %}{{result.price}}{% endif %}"
+                     placeholder="Bid Amount"/>
+              <p></p>
+              <input type="submit" class="btn btn-primary btn-lg" value="Submit"/>
+            </form>
+          </div>
+
+{% endblock %}
+
+{% block bottom_scripts %}
+<script>
+  $(function () {
+
+    $("#submitDeal").submit(function (e) {
+
+
+      var $price = $("#price-input");
+      var price_value = parseInt($price.val());
+      var price_original_val = parseInt($price.attr("data-original-value"));
+
+      if (price_value <= price_original_val) {
+
+        e.preventDefault();
+
+        window.alert("Price should be more than the latest bid");
+        $price.val(price_original_val);
+      }
+    });
+  });
+</script>
+{% endblock %}
